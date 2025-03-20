@@ -1,18 +1,15 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[1]:
-
-
 import sqlite3
 import subprocess
 import os
+import time
+import sys
 
 DB_PATH = "models.db"
 
-def get_model_path_by_role(user_id: str, role: str='serving') -> (str, int):
+def get_model_path_by_role(user_id: str, role: str='serving'):
     """
-    role='serving' or 'standby' 중 하나의 모델 path + gpu_id 반환
+    DB에서 user_id + role인 레코드를 찾아
+    (safetensors_path, gpu_id)를 반환
     """
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -26,41 +23,49 @@ def get_model_path_by_role(user_id: str, role: str='serving') -> (str, int):
     conn.close()
 
     if not row:
-        raise ValueError(f"{user_id}에 role={role}인 모델이 없음")
+        raise ValueError(f"No {role} model for user_id={user_id} in DB.")
     path, gpu = row
     if gpu is None:
         gpu = 0
     return path, gpu
 
-def restart_vllm_process(user_id: str, role: str='serving', default_port=8100):
-    """
-    1) pkill -f api_server
-    2) DB에서 role='serving'(또는 standby) 모델 path+gpu_id
-    3) vLLM 재실행
-    """
-    # kill 기존 프로세스
+def restart_vllm_process(user_id: str, role: str='serving', default_port=5022):
+    # 1) 기존 프로세스 kill
     subprocess.run(["pkill","-f","api_server"])
 
-    # DB 조회
+    # 2) DB에서 model_path, gpu_id 조회
     model_path, gpu_id = get_model_path_by_role(user_id, role=role)
+
+    # 3) 현재 파이썬 실행파일 (sys.executable)
+    python_exe = sys.executable
 
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
 
-    # 포트는 user_id/role에 따라 다르게 결정 가능
-    # 여기서는 간단히 default_port
     cmd = [
-        "python", "-m", "vllm.entrypoints.openai.api_server",
+        python_exe,
+        "-m",
+        "vllm.entrypoints.openai.api_server",
         "--model", model_path,
         "--port", str(default_port)
     ]
     print(f"[restart_vllm_process] CMD: {cmd}")
-    subprocess.Popen(cmd, env=env)
-    print(f"[restart_vllm_process] vLLM 재시작: user_id={user_id}, role={role}, gpu={gpu_id}, port={default_port}")
 
+    proc = subprocess.Popen(
+        cmd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
 
-# In[ ]:
-
-
-
-
+    # # 첫 번째 검사 (2초 뒤)
+    # time.sleep(2)
+    # rc = proc.poll()
+    # if rc is not None:
+    #     out, err = proc.communicate()
+    #     print(f"[restart_vllm_process] vLLM crashed (early). Return code={rc}")
+    #     print("stdout:", out)
+    #     print("stderr:", err)
+    # else:
+    #     print(f"[restart_vllm_process] vLLM is running (pid={proc.pid}) on port={default_port} (after 2s)")

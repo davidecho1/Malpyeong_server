@@ -1,99 +1,131 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[1]:
-
-
 from flask import Flask, request, jsonify
 import sqlite3
 import datetime
 
+# model_service.py functions
 from model_service import (
     download_repo_and_save_safetensors,
-    set_model_idle, set_model_standby, set_model_serving
+    set_model_idle,
+    set_model_standby,
+    set_model_serving
 )
+
+# vllm_control.py function
 from vllm_control import restart_vllm_process
 
 app = Flask(__name__)
+DB_PATH = "models.db"
 
+@app.route("/ping", methods=["GET"])
+def ping():
+    return {"msg":"pong"}, 200
+
+# ---------------------------
+# (1) 모델 다운로드
+# ---------------------------
 @app.route("/models/download", methods=["POST"])
 def models_download():
+    """
+    POST /models/download
+    Body: {"user_id":"TeamA/testcnn"}
+    - Hugging Face 리포에서 safetensors 다운로드 -> DB에 role='idle' 기록
+    """
     data = request.json
     user_id = data["user_id"]
     try:
-        download_repo_and_save_safetensors(user_id)  # role='idle'
-        return jsonify({"msg": f"Downloaded & set idle for user_id={user_id}"}), 200
+        download_repo_and_save_safetensors(user_id)
+        return jsonify({"msg": f"Downloaded & idle: {user_id}"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
+
+# ---------------------------
+# (2) 모델 스탠바이 (단일)
+# ---------------------------
 @app.route("/models/standby", methods=["POST"])
 def models_standby():
     """
+    POST /models/standby
     Body:
     {
       "user_id":"TeamA/testcnn",
       "gpu_id":0,
-      "port":8100
+      "port":5021
     }
-    -> set role='standby', then restart vLLM with role='standby'
+    - role='standby'
+    - vLLM 재시작 (standby)
     """
     data = request.json
     user_id = data["user_id"]
     gpu_id = data.get("gpu_id", 0)
-    port = data.get("port", 8100)
+    port = data.get("port", 5021)
     try:
         set_model_standby(user_id, gpu_id=gpu_id)
         restart_vllm_process(user_id, role='standby', default_port=port)
-        return jsonify({"msg":f"{user_id} -> standby(gpu={gpu_id}), port={port}"}), 200
+        return jsonify({"msg": f"{user_id} => standby(gpu={gpu_id}, port={port})"}), 200
     except Exception as e:
-        return jsonify({"error":str(e)}), 400
+        return jsonify({"error": str(e)}), 400
 
+
+# ---------------------------
+# (3) 모델 서빙 (단일)
+# ---------------------------
 @app.route("/models/serve", methods=["POST"])
 def models_serve():
     """
+    POST /models/serve
     Body:
     {
       "user_id":"TeamA/testcnn",
       "gpu_id":1,
-      "port":8101
+      "port":5022
     }
-    -> set role='serving', then restart vLLM with role='serving'
+    - role='serving'
+    - vLLM 재시작 (serving)
     """
     data = request.json
     user_id = data["user_id"]
     gpu_id = data.get("gpu_id", 0)
-    port = data.get("port", 8100)
+    port = data.get("port", 5022)
     try:
         set_model_serving(user_id, gpu_id=gpu_id)
         restart_vllm_process(user_id, role='serving', default_port=port)
-        return jsonify({"msg":f"{user_id} -> serving(gpu={gpu_id}), port={port}"}), 200
+        return jsonify({"msg": f"{user_id} => serving(gpu={gpu_id}, port={port})"}), 200
     except Exception as e:
-        return jsonify({"error":str(e)}), 400
+        return jsonify({"error": str(e)}), 400
 
+
+# ---------------------------
+# (4) 모델 idle (단일)
+# ---------------------------
 @app.route("/models/idle", methods=["POST"])
 def models_idle():
     """
-    Body:
-    {
-      "user_id":"TeamA/testcnn"
-    }
-    -> set role='idle', gpu_id=NULL, no vLLM process
+    POST /models/idle
+    Body: {"user_id":"TeamA/testcnn"}
+    - role='idle'
+    - GPU 해제(gpu_id=NULL)
+    - vLLM 프로세스는 pkill (restart_vllm_process 내 pkill)
     """
     data = request.json
     user_id = data["user_id"]
     try:
         set_model_idle(user_id)
-        return jsonify({"msg":f"{user_id} -> idle"}), 200
+        return jsonify({"msg": f"{user_id} => idle"}), 200
     except Exception as e:
-        return jsonify({"error":str(e)}), 400
+        return jsonify({"error": str(e)}), 400
 
+
+# ---------------------------
+# (5) 모델 목록 조회
+# ---------------------------
 @app.route("/models/list", methods=["GET"])
 def models_list():
     """
     GET /models/list
-    -> DB 모든 모델 (role, gpu_id)
+    - DB에 저장된 model_info 전체
     """
-    conn = sqlite3.connect("models.db")
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
         SELECT user_id, model_name, role, gpu_id, safetensors_path, downloaded_at
@@ -102,26 +134,247 @@ def models_list():
     rows = cur.fetchall()
     conn.close()
 
-    results=[]
+    results = []
     for r in rows:
         results.append({
-            "user_id":r[0],
-            "model_name":r[1],
-            "role":r[2],
-            "gpu_id":r[3],
-            "path":r[4],
-            "downloaded_at":r[5]
+            "user_id": r[0],
+            "model_name": r[1],
+            "role": r[2],
+            "gpu_id": r[3],
+            "path": r[4],
+            "downloaded_at": r[5]
         })
     return jsonify(results), 200
 
-# 대화/평가 API 동일 (생략)...
 
-if __name__=="__main__":
-    app.run(host="0.0.0.0", port=8000, debug=False, use_reloader=False)
+# ---------------------------
+# (6) 현재 서빙 모델 조회
+# ---------------------------
+@app.route("/models/current", methods=["GET"])
+def models_current():
+    """
+    GET /models/current?user_id=TeamA/testcnn
+    - user_id가 있으면 해당 user_id + role='serving' 조회
+    - 없으면 전체 role='serving' 조회
+    """
+    user_id = request.args.get("user_id", None)
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    if user_id:
+        cur.execute("""
+            SELECT model_name, safetensors_path, gpu_id
+            FROM model_info
+            WHERE user_id=? AND role='serving'
+            LIMIT 1
+        """, (user_id,))
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return jsonify({"msg": f"No serving model for {user_id}"}), 200
+        return jsonify({
+            "user_id": user_id,
+            "model_name": row[0],
+            "path": row[1],
+            "gpu_id": row[2]
+        }), 200
+    else:
+        cur.execute("""
+            SELECT user_id, model_name, safetensors_path, gpu_id
+            FROM model_info
+            WHERE role='serving'
+        """)
+        rows = cur.fetchall()
+        conn.close()
+        results = []
+        for r in rows:
+            results.append({
+                "user_id": r[0],
+                "model_name": r[1],
+                "path": r[2],
+                "gpu_id": r[3]
+            })
+        return jsonify(results), 200
 
 
-# In[ ]:
+# ---------------------------
+# (7) models/switch (이전 serving->idle, 새->serving)
+# ---------------------------
+@app.route("/models/switch", methods=["POST"])
+def models_switch():
+    """
+    Body:
+    {
+      "old_user_id": "TeamA/testcnn_v1",
+      "new_user_id": "TeamA/testcnn_v2",
+      "new_gpu_id": 0,
+      "new_port": 5021
+    }
+    - old_user_id => idle
+    - new_user_id => serving
+    - restart vLLM (serving)
+    """
+    data = request.json
+    old_user_id = data["old_user_id"]
+    new_user_id = data["new_user_id"]
+    new_gpu_id = data.get("new_gpu_id", 0)
+    new_port = data.get("new_port", 5021)
+
+    try:
+        # 1) 이전 serving -> idle
+        set_model_idle(old_user_id)
+
+        # 2) 새 모델 -> serving
+        set_model_serving(new_user_id, gpu_id=new_gpu_id)
+
+        # 3) vLLM 재시작
+        restart_vllm_process(new_user_id, role='serving', default_port=new_port)
+
+        return jsonify({
+            "msg": f"Switched from {old_user_id} to {new_user_id}. "
+                   f"{old_user_id} => idle, {new_user_id} => serving(gpu={new_gpu_id}, port={new_port})"
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+# ---------------------------
+# (8) models/standby_bulk (2개 이상 standby)
+# ---------------------------
+@app.route("/models/standby_bulk", methods=["POST"])
+def models_standby_bulk():
+    """
+    Body:
+    {
+      "user_ids": ["TeamA/testcnn_v3", "TeamB/testcnn_v1"],
+      "gpu_id": 0,
+      "port": 5021
+    }
+    -> 여러 모델을 한 번에 standby
+    -> 각각 vLLM 재시작(standby)
+    """
+    data = request.json
+    user_ids = data["user_ids"]
+    gpu_id = data.get("gpu_id", 0)
+    port = data.get("port", 5021)
+
+    results = []
+    for uid in user_ids:
+        try:
+            set_model_standby(uid, gpu_id=gpu_id)
+            restart_vllm_process(uid, role='standby', default_port=port)
+            results.append(f"{uid} => standby(gpu={gpu_id}, port={port})")
+        except Exception as e:
+            results.append(f"Error for {uid}: {str(e)}")
+
+    return jsonify({"results": results}), 200
+
+
+@app.route("/eval/submit", methods=["POST"])
+def eval_submit():
+    """
+    POST /eval/submit
+    Body 예시:
+    {
+      "a_model_name": "some_model.safetensors",
+      "b_model_name": "other_model.safetensors",
+      "prompt": "질문(프롬프트)",
+      "a_model_answer": "A 모델 답변",
+      "b_model_answer": "B 모델 답변",
+      "evaluation": 1,    # 1:A 우수, 2:B 우수, 3:둘 다 좋음, 4:둘 다 별로
+      "session_id": "abcd1234"  # optional
+    }
+    - DB conversation_eval 테이블에 한 행 insert
+    """
+    data = request.json
+    a_model_name = data.get("a_model_name", "")
+    b_model_name = data.get("b_model_name", "")
+    prompt = data.get("prompt", "")
+    a_model_answer = data.get("a_model_answer", "")
+    b_model_answer = data.get("b_model_answer", "")
+    evaluation = data.get("evaluation", 0)  # 1..4
+    session_id = data.get("session_id", "")
+
+    # timestamp = now
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # DB insert
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO conversation_eval
+        (a_model_name, b_model_name, prompt, a_model_answer, b_model_answer,
+         evaluation, timestamp, session_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (a_model_name, b_model_name, prompt, a_model_answer, b_model_answer,
+          evaluation, timestamp, session_id))
+    conn.commit()
+    conn.close()
+
+    return jsonify({"msg": "evaluation saved"}), 200
+
+
+@app.route("/eval/list", methods=["GET"])
+def eval_list():
+    """
+    GET /eval/list
+    Query params:
+      - session_id (optional)
+      - model_name (optional)
+    예: /eval/list?session_id=abcd1234
+        /eval/list?model_name=some_model.safetensors
+        /eval/list?session_id=xxx&model_name=yyy
+    """
+    session_id = request.args.get("session_id", None)
+    model_name = request.args.get("model_name", None)
+
+    query = """
+    SELECT a_model_name, b_model_name, prompt,
+           a_model_answer, b_model_answer,
+           evaluation, timestamp, session_id
+    FROM conversation_eval
+    """
+    conditions = []
+    params = []
+
+    if session_id:
+        conditions.append("session_id = ?")
+        params.append(session_id)
+
+    if model_name:
+        # A or B 중 하나라도 model_name이면
+        conditions.append("(a_model_name = ? OR b_model_name = ?)")
+        params.append(model_name)
+        params.append(model_name)
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(query, tuple(params))
+    rows = cur.fetchall()
+    conn.close()
+
+    results = []
+    for r in rows:
+        results.append({
+            "a_model_name": r[0],
+            "b_model_name": r[1],
+            "prompt": r[2],
+            "a_model_answer": r[3],
+            "b_model_answer": r[4],
+            "evaluation": r[5],
+            "timestamp": r[6],
+            "session_id": r[7]
+        })
+
+    return jsonify(results), 200
 
 
 
-
+# ---------------------------
+# Flask 실행 (port=5020)
+# ---------------------------
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5020, debug=False, use_reloader=False)
