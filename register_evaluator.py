@@ -22,7 +22,7 @@ def register_evaluator(evaluator_id: str, name: str, password: str):
         return
     
     # 비밀번호 저장
-    cur.execute("INSERT INTO user (id, name, password_hash) VALUES (?, ?, ?)",
+    cur.execute("INSERT INTO evaluator (id, name, password_hash) VALUES (?, ?, ?)",
                 (evaluator_id, name, password))
     conn.commit()
     conn.close()
