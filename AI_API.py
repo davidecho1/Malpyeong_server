@@ -277,7 +277,6 @@ def eval_submit():
     Body 예시:
     {
       "evaluator_id": "evaluser1",
-      "password": "secret123",
       "a_model_name": "some_model.safetensors",
       "b_model_name": "other_model.safetensors",
       "prompt": "질문(프롬프트)",
@@ -286,31 +285,24 @@ def eval_submit():
       "evaluation": 1,    // 1: A 우수, 2: B 우수, 3: 둘 다 좋음, 4: 둘 다 별로
       "session_id": "abcd1234"  // 선택사항
     }
-    - evaluator 인증 후, 평가 데이터를 DB의 conversation_eval 테이블에 저장 (evaluator_id 포함)
+    - evaluator_id만 평가 데이터와 함께 DB의 conversation_eval 테이블에 저장
     """
     data = request.json
     evaluator_id = data.get("evaluator_id")
-    password = data.get("password")
-    if not evaluator_id or not password:
-        return jsonify({"error": "evaluator_id와 password가 필요합니다."}), 400
-
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT password_hash FROM evaluator WHERE id=?", (evaluator_id,))
-    row = cur.fetchone()
-    if not row or not bcrypt.checkpw(password.encode('utf-8'), row[0].encode('utf-8')):
-        conn.close()
-        return jsonify({"error": "평가자 인증 실패"}), 401
+    if not evaluator_id:
+        return jsonify({"error": "evaluator_id가 필요합니다."}), 400
 
     a_model_name   = data.get("a_model_name", "")
     b_model_name   = data.get("b_model_name", "")
     prompt         = data.get("prompt", "")
     a_model_answer = data.get("a_model_answer", "")
     b_model_answer = data.get("b_model_answer", "")
-    evaluation     = data.get("evaluation", 0)
+    evaluation     = data.get("evaluation", 0)  # 1..4
     session_id     = data.get("session_id", "")
     timestamp      = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
     cur.execute("""
         INSERT INTO conversation_eval
         (a_model_name, b_model_name, prompt, a_model_answer, b_model_answer,
@@ -321,6 +313,7 @@ def eval_submit():
     conn.commit()
     conn.close()
     return jsonify({"msg": "evaluation saved"}), 200
+
 
 
 @app.route("/eval/list", methods=["GET"])

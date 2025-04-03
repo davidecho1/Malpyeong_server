@@ -15,7 +15,7 @@ def register_evaluator(evaluator_id: str, name: str, password: str):
     cur = conn.cursor()
     
     # 이미 등록되어 있는지 확인
-    cur.execute("SELECT * FROM user WHERE id=?", (evaluator_id,))
+    cur.execute("SELECT * FROM evaluator WHERE id=?", (evaluator_id,))
     if cur.fetchone():
         print(f"평가자 '{evaluator_id}'는 이미 등록되어 있습니다.")
         conn.close()
