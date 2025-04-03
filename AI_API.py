@@ -273,89 +273,91 @@ def models_standby_bulk():
 @app.route("/eval/submit", methods=["POST"])
 def eval_submit():
     """
-    POST /eval/submit
+    POST /eval/submit  
     Body 예시:
     {
+      "evaluator_id": "evaluser1",
+      "password": "secret123",
       "a_model_name": "some_model.safetensors",
       "b_model_name": "other_model.safetensors",
       "prompt": "질문(프롬프트)",
       "a_model_answer": "A 모델 답변",
       "b_model_answer": "B 모델 답변",
-      "evaluation": 1,    # 1:A 우수, 2:B 우수, 3:둘 다 좋음, 4:둘 다 별로
-      "session_id": "abcd1234"  # optional
+      "evaluation": 1,    // 1: A 우수, 2: B 우수, 3: 둘 다 좋음, 4: 둘 다 별로
+      "session_id": "abcd1234"  // 선택사항
     }
-    - DB conversation_eval 테이블에 한 행 insert
+    - evaluator 인증 후, 평가 데이터를 DB의 conversation_eval 테이블에 저장 (evaluator_id 포함)
     """
     data = request.json
-    a_model_name = data.get("a_model_name", "")
-    b_model_name = data.get("b_model_name", "")
-    prompt = data.get("prompt", "")
-    a_model_answer = data.get("a_model_answer", "")
-    b_model_answer = data.get("b_model_answer", "")
-    evaluation = data.get("evaluation", 0)  # 1..4
-    session_id = data.get("session_id", "")
+    evaluator_id = data.get("evaluator_id")
+    password = data.get("password")
+    if not evaluator_id or not password:
+        return jsonify({"error": "evaluator_id와 password가 필요합니다."}), 400
 
-    # timestamp = now
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # DB insert
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
+    cur.execute("SELECT password_hash FROM evaluator WHERE id=?", (evaluator_id,))
+    row = cur.fetchone()
+    if not row or not bcrypt.checkpw(password.encode('utf-8'), row[0].encode('utf-8')):
+        conn.close()
+        return jsonify({"error": "평가자 인증 실패"}), 401
+
+    a_model_name   = data.get("a_model_name", "")
+    b_model_name   = data.get("b_model_name", "")
+    prompt         = data.get("prompt", "")
+    a_model_answer = data.get("a_model_answer", "")
+    b_model_answer = data.get("b_model_answer", "")
+    evaluation     = data.get("evaluation", 0)
+    session_id     = data.get("session_id", "")
+    timestamp      = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
     cur.execute("""
         INSERT INTO conversation_eval
         (a_model_name, b_model_name, prompt, a_model_answer, b_model_answer,
-         evaluation, timestamp, session_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         evaluation, timestamp, session_id, evaluator_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (a_model_name, b_model_name, prompt, a_model_answer, b_model_answer,
-          evaluation, timestamp, session_id))
+          evaluation, timestamp, session_id, evaluator_id))
     conn.commit()
     conn.close()
-
     return jsonify({"msg": "evaluation saved"}), 200
 
 
 @app.route("/eval/list", methods=["GET"])
 def eval_list():
     """
-    GET /eval/list
-    Query params:
-      - session_id (optional)
-      - model_name (optional)
-    예: /eval/list?session_id=abcd1234
-        /eval/list?model_name=some_model.safetensors
-        /eval/list?session_id=xxx&model_name=yyy
+    GET /eval/list  
+    Query Parameters:
+      - session_id (선택)
+      - model_name (선택; a_model_name 또는 b_model_name)
+    - 조건에 맞는 평가 및 대화 기록을 반환함.
     """
     session_id = request.args.get("session_id", None)
     model_name = request.args.get("model_name", None)
-
     query = """
-    SELECT a_model_name, b_model_name, prompt,
-           a_model_answer, b_model_answer,
-           evaluation, timestamp, session_id
-    FROM conversation_eval
+        SELECT a_model_name, b_model_name, prompt,
+               a_model_answer, b_model_answer,
+               evaluation, timestamp, session_id, evaluator_id
+        FROM conversation_eval
     """
     conditions = []
     params = []
-
     if session_id:
         conditions.append("session_id = ?")
         params.append(session_id)
-
     if model_name:
-        # A or B 중 하나라도 model_name이면
         conditions.append("(a_model_name = ? OR b_model_name = ?)")
         params.append(model_name)
         params.append(model_name)
-
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
-
+    
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute(query, tuple(params))
     rows = cur.fetchall()
     conn.close()
-
+    
     results = []
     for r in rows:
         results.append({
@@ -366,11 +368,10 @@ def eval_list():
             "b_model_answer": r[4],
             "evaluation": r[5],
             "timestamp": r[6],
-            "session_id": r[7]
+            "session_id": r[7],
+            "evaluator_id": r[8]
         })
-
     return jsonify(results), 200
-
 
 
 # ---------------------------
