@@ -1,7 +1,7 @@
 
 import sqlite3
 
-DB_PATH = "models.db"
+DB_PATH = "evaluator.db"
 
 def register_evaluator(evaluator_id: str, name: str, password: str):
     """
