@@ -7,7 +7,7 @@ def main():
     GPU_PORT_MAP = {0: 5021, 1: 5022, 2: 5023, 3: 5024}
     
     # 팀 구성 CSV 파일 경로
-    csv_config_path = "team_config.csv"
+    csv_config_path = "schedule(day).csv"
     
     # 스케줄러 시작 (실제 운영은 매일 자정 실행; 테스트 시에는 CSV의 날짜와 time_offset에 따라 JOB이 등록됨)
     start_scheduler(GPU_PORT_MAP, csv_config_path)
