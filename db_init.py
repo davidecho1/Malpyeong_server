@@ -1,59 +1,65 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
+import psycopg2
 
-import sqlite3
+# DB 접속 정보 
+DB_CONN_INFO = "dbname=malpyeong user=TeddySum password=!TeddySum host=192.168.242.203 port=5100"
 
-def init_db(db_path="models.db"):
-    """
-    DB 스키마 생성:
-    1) model_info: 모델 정보 (user_id, model_name, 다운로드 시각, safetensors 경로, 상태, GPU 번호)
-    2) conversation_eval: 평가/대화 기록 (모델명, 질문, 답변, 평가, 타임스탬프, 세션ID, evaluator_id)
-    3) evaluator: 평가자 계정 정보 (id, name, password_hash)
-    """
-    conn = sqlite3.connect(db_path)
+def init_db():
+    conn = psycopg2.connect(DB_CONN_INFO)
     cur = conn.cursor()
 
-    # model_info 테이블 생성
-    cur.execute("DROP TABLE IF EXISTS model_info")
+    # 기존 테이블 삭제 (종속관계 포함)
+    cur.execute("DROP TABLE IF EXISTS evaluations CASCADE")
+    cur.execute("DROP TABLE IF EXISTS models CASCADE")
+    cur.execute("DROP TABLE IF EXISTS users CASCADE")
+
+    # 1. users 테이블: 평가자, 일반 유저 등 계정 관리
     cur.execute("""
-        CREATE TABLE model_info (
-            user_id TEXT NOT NULL,
-            model_name TEXT NOT NULL,
-            downloaded_at DATETIME,
-            safetensors_path TEXT,
-            role TEXT DEFAULT 'idle',
-            gpu_id INTEGER
+        CREATE TABLE users (
+            user_id SERIAL PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            password VARCHAR(255) NOT NULL,
+            role VARCHAR(20) DEFAULT 'user'
         )
     """)
 
-    # conversation_eval 테이블 생성 (평가 기록)
-    cur.execute("DROP TABLE IF EXISTS conversation_eval")
+    # 2. models 테이블: 팀(또는 모델 제출자)별 모델 정보
     cur.execute("""
-        CREATE TABLE conversation_eval (
-            a_model_name   TEXT NOT NULL,
-            b_model_name   TEXT NOT NULL,
-            prompt         TEXT,
+        CREATE TABLE models (
+            model_id SERIAL PRIMARY KEY,
+            team_name VARCHAR(100) NOT NULL,
+            model_name VARCHAR(100) NOT NULL,
+            safetensors_path TEXT,
+            gpu_id INTEGER,
+            model_state VARCHAR(20) DEFAULT 'idle',
+            downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 3. evaluations 테이블: 평가 기록 저장 (평가자는 users 테이블 참조)
+    cur.execute("""
+        CREATE TABLE evaluations (
+            evaluation_id SERIAL PRIMARY KEY,
+            a_model_id INTEGER NOT NULL REFERENCES models(model_id),
+            b_model_id INTEGER NOT NULL REFERENCES models(model_id),
+            prompt TEXT,
             a_model_answer TEXT,
             b_model_answer TEXT,
-            evaluation     INTEGER,
-            timestamp      DATETIME,
-            session_id     TEXT,
-            evaluator_id   TEXT
-        )
-    """)
-
-    # evaluator 테이블 생성 (평가자 계정 정보)
-    cur.execute("DROP TABLE IF EXISTS user")
-    cur.execute("""
-        CREATE TABLE user (
-            id            TEXT PRIMARY KEY,
-            name          TEXT,
-            password      TEXT
+            evaluation VARCHAR(20),
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            session_id VARCHAR(50),
+            evaluator_id INTEGER NOT NULL REFERENCES users(user_id),
+            CONSTRAINT check_different_models CHECK (a_model_id <> b_model_id)
         )
     """)
 
     conn.commit()
+    cur.close()
     conn.close()
-    print(f"[init_db] DB 초기화 완료: {db_path}")
+    print("DB 초기화 완료.")
 
 if __name__ == "__main__":
-    init_db("models.db")
+    init_db()
