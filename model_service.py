@@ -6,7 +6,7 @@ import datetime
 import psycopg2
 from huggingface_hub import snapshot_download
 
-DB_CONN_INFO = "dbname=malpyeong user=TeddySum password=!TeddySum host=192.168.242.203 port=5100"
+DB_CONN_INFO = "dbname=malpyeong user=postgres password=!TeddySum host=127.0.0.1 port=5432"
 
 def download_repo_and_save_safetensors(hf_repo_id: str):
     """

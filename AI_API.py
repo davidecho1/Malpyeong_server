@@ -16,7 +16,7 @@ from vllm_control import restart_vllm_process
 app = Flask(__name__)
 
 # PostgreSQL 접속 정보 (DB 연결 함수로 관리)
-DB_CONN_INFO = "dbname=malpyeong user=TeddySum password=!TeddySum host=192.168.242.203 port=5100"
+DB_CONN_INFO = "dbname=malpyeong user=postgres password=!TeddySum host=127.0.0.1 port=5432"
 
 def get_db_connection():
     return psycopg2.connect(DB_CONN_INFO)

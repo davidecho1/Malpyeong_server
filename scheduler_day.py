@@ -10,7 +10,7 @@ from vllm_control import restart_vllm_process
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
 # PostgreSQL 접속 정보 – 실제 환경에 맞게 수정하세요.
-DB_CONN_INFO = "dbname=malpyeong user=TeddySum password=!TeddySum host=192.168.242.203 port=5100"
+DB_CONN_INFO = "dbname=malpyeong user=postgres password=!TeddySum host=127.0.0.1 port=5432"
 
 # GPU → 포트 매핑 (예시; 환경에 맞게 수정하세요)
 GPU_PORT_MAP = {}

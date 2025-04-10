@@ -7,7 +7,7 @@ import os
 import sys
 import time
 
-DB_CONN_INFO = "dbname=malpyeong user=TeddySum password=!TeddySum host=192.168.242.203 port=5100"
+DB_CONN_INFO = "dbname=malpyeong user=postgres password=!TeddySum host=127.0.0.1 port=5432"
 
 def get_model_path_by_role(team_name: str, role: str='serving'):
     conn = psycopg2.connect(DB_CONN_INFO)
